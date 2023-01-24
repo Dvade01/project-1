@@ -12,7 +12,8 @@
   located in ./pages  (where '.' is the directory from which this
   program is run).
 """
-
+import re
+import os 
 import config    # Configure from .ini files and command line
 import logging   # Better than print statements
 logging.basicConfig(format='%(levelname)s:%(message)s',
@@ -84,15 +85,31 @@ def respond(sock):
     Any valid GET request is answered with an ascii graphic of a cat.
     """
     sent = 0
-    request = sock.recv(1024)  # We accept only short requests
+    request = sock.recv(1024) 
     request = str(request, encoding='utf-8', errors='strict')
     log.info("--- Received request ----")
     log.info("Request was {}\n***\n".format(request))
 
     parts = request.split()
     if len(parts) > 1 and parts[0] == "GET":
-        transmit(STATUS_OK, sock)
-        transmit(CAT, sock)
+        # Get the requested file name from the GET request
+        file_name = parts[1][1:] # remove the leading '/'
+        if '..' in file_name or '~' in file_name:
+            # transmit 403 Forbidden error
+            transmit(STATUS_FORBIDDEN, sock)
+            transmit("Error Code 403:\n Forbidden Characters in file name", sock)
+        else:
+            # Check if the file exists in the "pages" directory
+            file_path = 'pages/' + file_name
+            if os.path.isfile(file_path):
+                with open(file_path, 'r') as f:
+                    file_content = f.read()
+                    transmit(STATUS_OK, sock)
+                    transmit(file_content, sock)
+            else:
+                # transmit 404 Not Found error
+                transmit(STATUS_NOT_FOUND, sock)
+                transmit("Error Code 404:\n File not found", sock)
     else:
         log.info("Unhandled request: {}".format(request))
         transmit(STATUS_NOT_IMPLEMENTED, sock)
@@ -101,8 +118,6 @@ def respond(sock):
     sock.shutdown(socket.SHUT_RDWR)
     sock.close()
     return
-
-
 def transmit(msg, sock):
     """It might take several sends to get the whole message out"""
     sent = 0
