@@ -1,17 +1,16 @@
 """
   A trivial web server in Python.
-
   Based largely on https://docs.python.org/3.4/howto/sockets.html
   This trivial implementation is not robust:  We have omitted decent
   error handling and many other things to keep the illustration as simple
   as possible.
-
   FIXME:
   Currently this program always serves an ascii graphic of a cat.
   Change it to serve files if they end with .html or .css, and are
   located in ./pages  (where '.' is the directory from which this
   program is run).
 """
+from functools import partial
 import re
 import os 
 import config    # Configure from .ini files and command line
@@ -23,7 +22,10 @@ log = logging.getLogger(__name__)
 
 import socket    # Basic TCP/IP communication on the internet
 import _thread   # Response computation runs concurrently with main program
-
+#import configparser
+#config_p = configparser.ConfigParser()
+#config_p.read("credentials.ini")
+#docroot = config_p['SERVER']['DOCROOT']
 
 def listen(portnum):
     """
@@ -77,15 +79,13 @@ STATUS_OK = "HTTP/1.0 200 OK\n\n"
 STATUS_FORBIDDEN = "HTTP/1.0 403 Forbidden\n\n"
 STATUS_NOT_FOUND = "HTTP/1.0 404 Not Found\n\n"
 STATUS_NOT_IMPLEMENTED = "HTTP/1.0 401 Not Implemented\n\n"
-
-
-def respond(sock):
+def respond(sock, docroot):
     """
     This server responds only to GET requests (not PUT, POST, or UPDATE).
     Any valid GET request is answered with an ascii graphic of a cat.
     """
     sent = 0
-    request = sock.recv(1024) 
+    request = sock.recv(1024)
     request = str(request, encoding='utf-8', errors='strict')
     log.info("--- Received request ----")
     log.info("Request was {}\n***\n".format(request))
@@ -93,23 +93,23 @@ def respond(sock):
     parts = request.split()
     if len(parts) > 1 and parts[0] == "GET":
         # Get the requested file name from the GET request
-        file_name = parts[1][1:] # remove the leading '/'
+        file_name = parts[1]# get the file name
         if '..' in file_name or '~' in file_name:
             # transmit 403 Forbidden error
             transmit(STATUS_FORBIDDEN, sock)
             transmit("Error Code 403:\n Forbidden Characters in file name", sock)
+
+
+        elif os.path.isfile(f"{docroot}/{parts[1]}"):
+            transmit(STATUS_OK, sock)
+            file_content = ""
+            with open(f"{docroot}/{parts[1]}") as f:
+                file_content = f.read()
+            transmit(file_content, sock)
         else:
-            # Check if the file exists in the "pages" directory
-            file_path = 'pages/' + file_name
-            if os.path.isfile(file_path):
-                with open(file_path, 'r') as f:
-                    file_content = f.read()
-                    transmit(STATUS_OK, sock)
-                    transmit(file_content, sock)
-            else:
                 # transmit 404 Not Found error
-                transmit(STATUS_NOT_FOUND, sock)
-                transmit("Error Code 404:\n File not found", sock)
+            transmit(STATUS_NOT_FOUND, sock)
+            transmit("Error Code 404:\n File not found", sock)
     else:
         log.info("Unhandled request: {}".format(request))
         transmit(STATUS_NOT_IMPLEMENTED, sock)
@@ -118,6 +118,7 @@ def respond(sock):
     sock.shutdown(socket.SHUT_RDWR)
     sock.close()
     return
+
 def transmit(msg, sock):
     """It might take several sends to get the whole message out"""
     sent = 0
@@ -153,12 +154,13 @@ def get_options():
 def main():
     options = get_options()
     port = options.PORT
+    docroot = options.DOCROOT
     if options.DEBUG:
         log.setLevel(logging.DEBUG)
     sock = listen(port)
     log.info("Listening on port {}".format(port))
     log.info("Socket is {}".format(sock))
-    serve(sock, respond)
+    serve(sock, partial(respond, docroot=docroot))
 
 
 if __name__ == "__main__":
